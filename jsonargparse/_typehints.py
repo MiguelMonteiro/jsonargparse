@@ -62,6 +62,7 @@ from ._loaders_dumpers import (
 )
 from ._namespace import Namespace
 from ._optionals import (
+    capture_typing_extension_shadows,
     get_alias_target,
     is_alias_type,
     is_annotated,
@@ -93,6 +94,7 @@ __all__ = ["lazy_instance"]
 NotRequired = typing_extensions_import("NotRequired")
 Required = typing_extensions_import("Required")
 _TypedDictMeta = typing_extensions_import("_TypedDictMeta")
+Unpack = typing_extensions_import("Unpack")
 
 
 def _capture_typing_extension_shadows(name: str, *collections) -> None:
@@ -101,9 +103,7 @@ def _capture_typing_extension_shadows(name: str, *collections) -> None:
     """
     current_module = sys.modules[__name__]
     typehint = getattr(current_module, name)
-    if getattr(typehint, "__module__", None) == "typing_extensions" and hasattr(__import__("typing"), name):
-        for collection in collections:
-            collection.add(getattr(__import__("typing"), name))
+    return capture_typing_extension_shadows(typehint, name, *collections)
 
 
 root_types = {
@@ -142,6 +142,7 @@ root_types = {
     abc.Callable,
     NotRequired,
     Required,
+    Unpack,
 }
 
 leaf_types = {
@@ -192,6 +193,9 @@ _capture_typing_extension_shadows("TypedDict", typed_dict_types)
 
 typed_dict_meta_types = {_TypedDictMeta}
 _capture_typing_extension_shadows("_TypedDictMeta", typed_dict_meta_types)
+
+unpack_types = {Unpack}
+_capture_typing_extension_shadows("Unpack", unpack_types)
 
 subclass_arg_parser: ContextVar = ContextVar("subclass_arg_parser")
 allow_default_instance: ContextVar = ContextVar("allow_default_instance", default=False)
@@ -440,6 +444,12 @@ class ActionTypeHint(Action):
                     for skip_key in skip_keys:
                         if skip_key in parser.required_args:
                             del val.init_args[skip_key]
+
+    @staticmethod
+    def delete_not_required_args(cfg_from, cfg_to):
+        for key, val in list(cfg_to.items(branches=True)):
+            if val == inspect._empty and key not in cfg_from:
+                del cfg_to[key]
 
     @staticmethod
     @contextmanager
@@ -921,7 +931,22 @@ def adapt_typehints(
                         kwargs["prev_val"] = None
                 val[k] = adapt_typehints(v, subtypehints[1], **kwargs)
         if type(typehint) in typed_dict_meta_types:
-            if typehint.__total__:
+            if hasattr(typehint, "__required_keys__"):
+                required_keys = set(typehint.__required_keys__)
+                # The standard library TypedDict below Python 3.11 does not store runtime
+                # information about optional and required keys when using Required or NotRequired.
+                # Thus, capture explicitly Required keys
+                required_keys.update(
+                    {k for k, v in typehint.__annotations__.items() if get_typehint_origin(v) in required_types}
+                )
+                # And remove explicitly NotRequired keys
+                required_keys.difference_update(
+                    {k for k, v in typehint.__annotations__.items() if get_typehint_origin(v) in not_required_types}
+                )
+            # The standard library TypedDict in Python 3.8 does not store runtime information
+            # about which (if any) keys are optional. See https://bugs.python.org/issue38834.
+            # Thus, fall back to totality and explicitly Required keys
+            elif typehint.__total__:
                 required_keys = {
                     k for k, v in typehint.__annotations__.items() if get_typehint_origin(v) not in not_required_types
                 }
