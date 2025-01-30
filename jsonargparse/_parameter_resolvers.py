@@ -104,8 +104,10 @@ def is_method(attr) -> bool:
         attr
     )
 
+
 def is_partial_method(attr) -> bool:
     return isinstance(attr, partialmethod) or isinstance(attr, partial)
+
 
 def is_property(attr) -> bool:
     return isinstance(attr, property)
