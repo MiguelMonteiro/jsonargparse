@@ -3,6 +3,7 @@ from __future__ import annotations
 import calendar
 import inspect
 import xml.dom
+from functools import partialmethod
 from random import shuffle
 from typing import Any, Callable, Dict, List, Optional, Protocol, Union
 from unittest.mock import patch
@@ -36,6 +37,8 @@ class ClassA:
             pma2: help for pma2
             kma1: help for kma1
         """
+
+    partial_method_a = partialmethod(method_a, pma1=1, pma2=0.5)
 
 
 class ClassB(ClassA):
@@ -1011,6 +1014,14 @@ def test_get_params_some_ignored():
         assert_params(get_params(func_several_params), ["p1", "p4"], help=False)
     with patch.dict("jsonargparse._parameter_resolvers.ignore_params", {f"{__name__}.func_given_kwargs": {"p3"}}):
         assert_params(get_params(func_given_kwargs), ["p", "p1"], help=False)
+
+
+# test partial method
+def test_partialmethod():
+    ClassA.partial_method_a = partialmethod(ClassA.method_a, pma1=1, pma2=0.5)
+    assert_params(get_params(ClassA, "partial_method_a"), ["pma1", "pma2", "kma1"])
+    with source_unavailable():
+        assert_params(get_params(ClassA, "partial_method_a"), ["pma1", "pma2", "kma1"])
 
 
 # unsupported cases
